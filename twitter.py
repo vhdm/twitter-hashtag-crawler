@@ -12,12 +12,9 @@ warnings.filterwarnings("ignore")
 
 if __name__ == "__main__":
 	os.system("cls")
-	# username=input("Twitter Username: ")
-	# password=input("Twitter Passwor: ")
-	# keyword=input("Hashtag: ")
 	if not os.path.isfile('config.ini'):
 		config=open("./config.ini","w",encoding='utf-8')
-		config.write('keywords="کرونا,کوید19,کروناویروس,ویروس کرونا"\r\ncount=10000\r\nheadless=yes')
+		config.write('keywords="کرونا,کوید19,کروناویروس,ویروس کرونا"\r\ncount=10000\r\nheadless=yes\r\nexecutable_path=chromedriver.exe')
 		config.close()
 	config = ini.parse(open('./config.ini',encoding='utf-8').read())
 	count = int(config['count'])
@@ -31,15 +28,8 @@ if __name__ == "__main__":
 		options.add_argument('--headless')
 	options.add_argument('--silent')
 	options.add_argument('--disable-gpu') 
-	driver = webdriver.Chrome(executable_path='G:\\selenium\\twitter\\chromedriver.exe',chrome_options=options)
-	# driver.get("https://twitter.com/login")
-	# time.sleep(1)
-	# driver.find_element_by_name('session[username_or_email]').send_keys("*******")        
-	# driver.find_element_by_name('session[password]').send_keys("******")
-	# driver.find_element_by_name('session[password]').submit()
-	# time.sleep(1)
-
-	if 'compose/tweet' in driver.page_source or True:
+	driver = webdriver.Chrome(executable_path=config['executable_path'],chrome_options=options)
+	if True:
 		posts = []
 		try:
 			print("Logged Successfully...")
