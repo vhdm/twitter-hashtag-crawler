@@ -1,121 +1,194 @@
 
 from datetime import datetime
 from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
 import hashlib, re, random
 from bs4 import BeautifulSoup
 import time, os, pickle, sys, socket, json, configparser, warnings, base64, threading
 from progress.bar import Bar
 import ini
+import urllib.request , socket
+from stem import Signal
+from stem.control import Controller
+from selenium.webdriver.firefox.options import Options
+import numpy as np
+import pandas as pd
 warnings.filterwarnings("ignore") 
 
+
+def switchIP():
+    with Controller.from_port(port = 9051) as controller:
+        controller.authenticate()
+        controller.signal(Signal.NEWNYM)
+
+
+
+
+def crawler(PROXY_HOST="127.0.0.1",PROXY_PORT=9050,posts=[],bar=None,config={},split_counter=0,unique_hash=[],keywords_stack=[]):
+	# os.system("cls")
+
+	fp = webdriver.FirefoxProfile()
+	count= int(config['count'])
+	split= int(config['split'])
+    # Direct = 0, Manual = 1, PAC = 2, AUTODETECT = 4, SYSTEM = 5
+	fp.set_preference("network.proxy.type", 1)
+	fp.set_preference("network.proxy.socks",PROXY_HOST)
+	fp.set_preference("network.proxy.socks_port",int(PROXY_PORT))
+	fp.update_preferences()
+	options = Options()
+	options.headless = True if config['headless'] =='yes' else False
+	driver = webdriver.Firefox(options=options, firefox_profile=fp)
+	driver.get("http://ifconfig.me/ip")
+	html = driver.page_source
+	soup = BeautifulSoup(html, 'lxml')
+	print("\r\nTor IP: ",soup.find("pre").text)
+	try:
+		keyword=keywords_stack.pop()
+		main_link='https://twitter.com/search?q=%23{}&f=live'.format(keyword)
+		keywords_stack.insert(0,keyword)
+		print("Stack: ",keywords_stack, keyword)
+		driver.get(main_link)				
+		while True:
+			try:
+				if "Something went wrong." in driver.page_source:
+					switchIP()
+					print("\r\nSwitch Proxy...")
+					print("Posts Count: {}".format(len(posts)))
+					driver.close()
+					crawler(posts=posts,bar=bar,config=config,split_counter=split_counter,unique_hash=unique_hash,keywords_stack=keywords_stack)
+				soup = BeautifulSoup(driver.page_source)
+				tweets = soup.findAll(attrs={"data-testid" : "tweet"})
+				for tweet in tweets:
+					try:
+						post={'text':'','media':'','link':'','author_name':'','author_username':'','author_avatar':'','type':'text','hash':'','hashtags':''}
+						photo =    tweet.find('div',attrs={'data-testid':'tweetPhoto'})
+						video =    tweet.find('video')
+						div=tweet.findAll('div')[1]
+						if len(div.findAll('a',attrs={'role':'link'})) > 0:
+							author = div.findAll('a',attrs={'role':'link'})[0]
+						else:
+							continue
+						if type(tweet.find_all("a", href=re.compile("/status/"))) == list:
+							post['link'] = "https://twitter.com{}".format(tweet.find_all("a", href=re.compile("/status/"))[0]['href'])
+						if hasattr(tweet.find('time'),'datetime'):
+							post['datetime'] = tweet.find('time')['datetime']
+						else:
+							continue
+						post['author_name']=''
+						post['author_username']=author['href'].strip("/")
+						if author.findAll('img') == list and author.findAll('img')[0].get('src'):
+							post['author_avatar']=author.findAll('img')[0]['src']							
+						span_counter=0		
+						fa_tweet=tweet.findAll('div',attrs={'lang':'fa'})
+						hashtags=[]
+						if fa_tweet is not None and len(fa_tweet) > 0 :
+							fa_tweet=fa_tweet[0]
+							for span in fa_tweet.findAll('span'):
+								text=span.get_text().strip(" ")
+								if "#" in text and text not in hashtags:
+									hashtags.append(text)
+								post['text']="{} {}".format(post['text'] , text)
+							for span in tweet.findAll('span'):
+								span_counter+=1
+								if span_counter == 1:
+									post['author_name']=span.get_text()							
+							post['hashtags'] = ",".join(hashtags)
+							if photo is not None:
+								post['type']='photo'
+								if hasattr(photo.find('img'),'src'):
+									post['media'] = photo.find('img')['src']
+							if video is not None:
+								post['type']='video'
+								post['media'] = video['src']				
+							if post['text'] != '':
+								post['hash'] = hashlib.md5(post['text'].encode('utf-8')).hexdigest()
+							elif post['media'] != '':
+								post['hash'] = hashlib.md5(post['media'].encode('utf-8')).hexdigest()
+							else:
+								continue
+							if 	post['hash'] in unique_hash:
+								continue
+							unique_hash.append(post['hash'])
+							bar.next()
+							posts.append(post)
+							if len(posts) >= count:
+								df = pd.DataFrame.from_dict(posts)
+								if config['type'] == 'csv':
+									df.to_csv("{}data-{}-{}.csv".format(config['results_path'],split,split_counter))
+								else:
+									df.to_json("{}data-{}-{}.json".format(config['results_path'],split,split_counter))
+								hash_file=open("{}unique-hashes.txt".format(config['results_path'],split,split_counter),'w')
+								for hash in unique_hash:
+									hash_file.write(str(hash)+'\n')
+								hash_file.close()
+								return True
+							if len(posts)   >= int(split):
+								split_counter+=1
+								df = pd.DataFrame.from_dict(posts)
+								if config['type'] == 'csv':
+									df.to_csv("{}data-{}-{}.csv".format(config['results_path'],split,split_counter))
+								else:
+									df.to_json("{}data-{}-{}.json".format(config['results_path'],split,split_counter))
+								hash_file=open("{}unique-hashes.txt".format(config['results_path'],split,split_counter),'w')
+								for hash in unique_hash:
+									hash_file.write(str(hash)+'\n')
+								hash_file.close()
+								posts=[]								
+					except Exception as e:
+						exc_type, exc_obj, exc_tb = sys.exc_info()
+						fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+						print(exc_type, fname, exc_tb.tb_lineno)
+
+				time.sleep(random.randint(1, 3))
+				driver.execute_script("window.scrollTo(0,document.body.scrollHeight - {})".format(random.randint(1, 200)))
+			except Exception as e:
+				exc_type, exc_obj, exc_tb = sys.exc_info()
+				fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+				print(exc_type, fname, exc_tb.tb_lineno)
+				exit()
+	except Exception as e:
+		exc_type, exc_obj, exc_tb = sys.exc_info()
+		fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+		print(exc_type, fname, exc_tb.tb_lineno)
+		exit()
+	finally:
+		df = pd.DataFrame.from_dict(posts)
+		if config['type'] == 'csv':
+			df.to_csv("{}data-{}-{}.csv".format(config['results_path'],split,split_counter))
+		else:
+			df.to_json("{}data-{}-{}.json".format(config['results_path'],split,split_counter))
+
+		hash_file=open("{}unique-hashes.txt".format(config['results_path'],split,split_counter),'w')
+		for hash in unique_hash:
+			hash_file.write(str(hash)+'\n')
+		hash_file.close()
+		print("\r\n{} post found and write to file!".format(len(posts)))
 
 if __name__ == "__main__":
 	os.system("cls")
 	if not os.path.isfile('config.ini'):
+		path="{}\\results\\".format(os.getcwd())
 		config=open("./config.ini","w",encoding='utf-8')
-		config.write('keywords="کرونا,کوید19,کروناویروس,ویروس کرونا"\r\ncount=10000\r\nheadless=yes\r\nexecutable_path=chromedriver.exe')
+		os.makedirs(path)
+		config.write('keywords="کرونا,کوید19,کروناویروس,ویروس_کرونا"\ncount=20000\nheadless=no\ntype=csv\nsplit=1000\nresults_path="{}"'.format(path))
 		config.close()
+		print("Config File Generated... Run Again")
+		exit(0)
 	config = ini.parse(open('./config.ini',encoding='utf-8').read())
 	count = int(config['count'])
-	if "," in config['keywords']:
-		keywords=config['keywords'].split(',')
-	else:
-		keywords=config['keywords']
-	options = Options()
-	options.add_argument('--disable-logging') 
-	if config['headless'] =='yes':
-		options.add_argument('--headless')
-	options.add_argument('--silent')
-	options.add_argument('--disable-gpu') 
-	driver = webdriver.Chrome(executable_path=config['executable_path'],chrome_options=options)
-	if True:
-		posts = []
-		try:
-			print("Logged Successfully...")
-			main_link='https://twitter.com/search?q=%23{}&f=live'.format(keywords[0] if type(keywords) == list else keywords)
-			driver.get(main_link)				
-			not_complete=True
-			while_counter=0
-			unique_hash=[]
-			bar = Bar('Processing', max=count)
-			while not_complete:
-				for keyword in keywords:
-					main_link='https://twitter.com/search?q=%23{}&f=live'.format(keyword)
-					try:
-						if while_counter > 100:
-							while_counter=0
-							driver.get(main_link)
-						else:
-							while_counter+=1
-						soup = BeautifulSoup(driver.page_source)
-						tweets = soup.findAll(attrs={"data-testid" : "tweet"})
-						for tweet in tweets:
-							try:
-								post={'text':'','media':'','link':'','author':{},'type':'text','hash':'','hashtags':''}
-								photo =    tweet.find('div',attrs={'data-testid':'tweetPhoto'})
-								video =    tweet.find('video')
-								div=tweet.findAll('div')[1]
-								author = div.findAll('a',attrs={'role':'link'})[0]
-								post['link'] = "https://twitter.com{}".format(tweet.find_all("a", href=re.compile("/status/"))[0]['href'])
-								post['datetime'] = tweet.find('time')['datetime']				
-								post['author']={
-									'name':'',
-									'username':  author['href'].strip("/"),
-									'avatar':author.findAll('img')[0]['src'], 
-								}
-								span_counter=0		
-								fa_tweet=tweet.findAll('div',attrs={'lang':'fa'})
-								hashtags=[]
-								if fa_tweet is not None and len(fa_tweet) > 0 :
-									fa_tweet=fa_tweet[0]
-									for span in fa_tweet.findAll('span'):
-										text=span.get_text().strip(" ")
-										if "#" in text and text not in hashtags:
-											hashtags.append(text)
-										post['text']="{} {}".format(post['text'] , text)
-									for span in tweet.findAll('span'):
-										span_counter+=1
-										if span_counter == 1:
-											post['author']['name']=span.get_text()							
-									post['hashtags'] = ",".join(hashtags)
-									if photo is not None:
-										post['type']='photo'
-										post['media'] = photo.find('img')['src']
-									if video is not None:
-										post['type']='video'
-										post['media'] = video['src']				
-									if post['text'] != '':
-										post['hash'] = hashlib.md5(post['text'].encode('utf-8')).hexdigest()
-									elif post['media'] != '':
-										post['hash'] = hashlib.md5(post['media'].encode('utf-8')).hexdigest()
-									else:
-										continue
-									if 	post['hash'] in unique_hash:
-										continue
-									unique_hash.append(post['hash'])
-									bar.next()
-									posts.append(post)
-								if len(posts) >= count:
-									not_complete=False
-									print("Finish...")
-									break
-							except Exception as e:
-								# print('Error in tweet for loop: \r\n{}'.format(str(e)))
-								pass
-						time.sleep(random.randint(1, 3))
-						driver.execute_script("window.scrollTo(0,document.body.scrollHeight - {})".format(random.randint(1, 200)))
-					except Exception as e:
-						print('Error in while loop: \r\n{}'.format(str(e)))
-		except Exception as e:
-			print(str(e))
-		finally:
-			a=open('result.json','w+',encoding='utf-8')
-			a.write(json.dumps(posts))
-			a.close()
-			print("{} post found and write to file!".format(len(posts)))
-	elif "temporarily limited" in driver.page_source:
-		print("We've temporarily limited some of your account features!\r\nPlease solve the recaptcha to continue...")
-	else:
-		print("Not Logged...")
+	bar = Bar('Processing', max=count)
+	unique_hash=[]
+	if os.path.exists("{}unique-hashes.txt".format(config['results_path'])):
+		with open("{}unique-hashes.txt".format(config['results_path']),'r',encoding='utf-8') as unique_hash_file:
+			for line in unique_hash_file:
+				unique_hash.append(line.replace("\n",""))
+			print("\r\nLoad Old Hashe [{}]".format(len(unique_hash)))
+			time.sleep(3)
 
+	keywords_stack=[]
+	if "," in config['keywords']:
+		keywords_stack=config['keywords'].split(',')
+	else:
+		keywords_stack=config['keywords']
+
+	print("Started At: {}".format(datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+	crawler(bar=bar,config=config,unique_hash=unique_hash,split_counter=len(unique_hash),keywords_stack=keywords_stack)

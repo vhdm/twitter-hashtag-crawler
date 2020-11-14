@@ -1,6 +1,8 @@
-beautifulsoup4==4.9.3
-progress==1.5
-selenium==3.141.0
-ini-parser==1.1.0
-soupsieve==2.0.1
-urllib3==1.25.11
+beautifulsoup4
+progress
+ini-parser
+stem
+selenium
+numpy==1.19.3
+pandas
+lxml
