@@ -25,7 +25,7 @@ def switchIP():
 
 def crawler(PROXY_HOST="127.0.0.1",PROXY_PORT=9050,posts=[],bar=None,config={},split_counter=0,unique_hash=[],keywords_stack=[]):
 	# os.system("cls")
-
+	last_reload_at=datetime.now()
 	fp = webdriver.FirefoxProfile()
 	count= int(config['count'])
 	split= int(config['split'])
@@ -49,10 +49,11 @@ def crawler(PROXY_HOST="127.0.0.1",PROXY_PORT=9050,posts=[],bar=None,config={},s
 		driver.get(main_link)				
 		while True:
 			try:
-				if "Something went wrong." in driver.page_source:
+				time_diff_sec=(datetime.now() - last_reload_at).seconds
+				if "Something went wrong." in driver.page_source or time_diff_sec > 40:
 					switchIP()
 					print("\r\nSwitch Proxy...")
-					print("Posts Count: {}".format(len(posts)))
+					print("\r\nPosts Count: {}, Diff In Sec: {}".format(len(posts),time_diff_sec))
 					driver.close()
 					crawler(posts=posts,bar=bar,config=config,split_counter=split_counter,unique_hash=unique_hash,keywords_stack=keywords_stack)
 				soup = BeautifulSoup(driver.page_source)
@@ -108,6 +109,7 @@ def crawler(PROXY_HOST="127.0.0.1",PROXY_PORT=9050,posts=[],bar=None,config={},s
 							if 	post['hash'] in unique_hash:
 								continue
 							unique_hash.append(post['hash'])
+							last_reload_at = datetime.now()	
 							bar.next()
 							posts.append(post)
 							if len(posts) >= count:
@@ -132,12 +134,13 @@ def crawler(PROXY_HOST="127.0.0.1",PROXY_PORT=9050,posts=[],bar=None,config={},s
 								for hash in unique_hash:
 									hash_file.write(str(hash)+'\n')
 								hash_file.close()
-								posts=[]								
+								posts=[]		
+												
 					except Exception as e:
 						exc_type, exc_obj, exc_tb = sys.exc_info()
 						fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
 						print(exc_type, fname, exc_tb.tb_lineno)
-
+				
 				time.sleep(random.randint(1, 3))
 				driver.execute_script("window.scrollTo(0,document.body.scrollHeight - {})".format(random.randint(1, 200)))
 			except Exception as e:
@@ -150,18 +153,18 @@ def crawler(PROXY_HOST="127.0.0.1",PROXY_PORT=9050,posts=[],bar=None,config={},s
 		fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
 		print(exc_type, fname, exc_tb.tb_lineno)
 		exit()
-	finally:
-		df = pd.DataFrame.from_dict(posts)
-		if config['type'] == 'csv':
-			df.to_csv("{}data-{}-{}.csv".format(config['results_path'],split,split_counter))
-		else:
-			df.to_json("{}data-{}-{}.json".format(config['results_path'],split,split_counter))
+	# finally:
+	# 	df = pd.DataFrame.from_dict(posts)
+	# 	if config['type'] == 'csv':
+	# 		df.to_csv("{}data-{}-{}.csv".format(config['results_path'],split,split_counter))
+	# 	else:
+	# 		df.to_json("{}data-{}-{}.json".format(config['results_path'],split,split_counter))
 
-		hash_file=open("{}unique-hashes.txt".format(config['results_path'],split,split_counter),'w')
-		for hash in unique_hash:
-			hash_file.write(str(hash)+'\n')
-		hash_file.close()
-		print("\r\n{} post found and write to file!".format(len(posts)))
+	# 	hash_file=open("{}unique-hashes.txt".format(config['results_path'],split,split_counter),'w')
+	# 	for hash in unique_hash:
+	# 		hash_file.write(str(hash)+'\n')
+	# 	hash_file.close()
+	# 	print("\r\n{} post found and write to file!".format(len(posts)))
 
 if __name__ == "__main__":
 	os.system("cls")
