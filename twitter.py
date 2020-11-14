@@ -23,7 +23,7 @@ def switchIP():
 
 
 
-def crawler(PROXY_HOST="127.0.0.1",PROXY_PORT=9050,posts=[],bar=None,config={},split_counter=0,unique_hash=[],keywords_stack=[]):
+def crawler(PROXY_HOST="127.0.0.1",PROXY_PORT=9050,posts=[],bar=None,config={},split_counter=0,unique_hash=[],keywords_stack=[],start_time=datetime.now()):
 	# os.system("cls")
 	last_reload_at=datetime.now()
 	fp = webdriver.FirefoxProfile()
@@ -37,25 +37,34 @@ def crawler(PROXY_HOST="127.0.0.1",PROXY_PORT=9050,posts=[],bar=None,config={},s
 	options = Options()
 	options.headless = True if config['headless'] =='yes' else False
 	driver = webdriver.Firefox(options=options, firefox_profile=fp)
-	driver.get("http://ifconfig.me/ip")
+	try:
+		driver.get("http://ifconfig.me/ip")
+	except:
+		print("Proxy server not runing...")
+		driver.close()
+		exit()
 	html = driver.page_source
 	soup = BeautifulSoup(html, 'lxml')
 	print("\r\nTor IP: ",soup.find("pre").text)
 	try:
-		keyword=keywords_stack.pop()
-		main_link='https://twitter.com/search?q=%23{}&f=live'.format(keyword)
+		keyword=keywords_stack.pop()		
+		# str_filter="(%23{})%20lang%3Afa%20since%3A2020-02-16%20-filter%3Alinks%20-filter%3Areplies&src=typed_query&f=live".format(keyword)
+		str_filter="(%23{})%20lang%3Afa%20until%3A{}%20since%3A{}%20-filter%3Alinks%20-filter%3Areplies&src=typed_query&f=live".format(keyword,config['to_date'],config['from_date'])
+		main_link='https://twitter.com/search?q={}'.format(str_filter)
 		keywords_stack.insert(0,keyword)
 		print("Stack: ",keywords_stack, keyword)
 		driver.get(main_link)				
 		while True:
-			try:
+			try:				
 				time_diff_sec=(datetime.now() - last_reload_at).seconds
-				if "Something went wrong." in driver.page_source or time_diff_sec > 40:
+				if "Something went wrong." in driver.page_source or time_diff_sec > 50 or "No results for " in driver.page_source:
 					switchIP()
+					# diff_in_min = ((datetime.now() - start_time).seconds // 60) // bar.index
+					# print("\r\nCrawl Speed: {} tpm(tweet per minute)".format(diff_in_min))
 					print("\r\nSwitch Proxy...")
 					print("\r\nPosts Count: {}, Diff In Sec: {}".format(len(posts),time_diff_sec))
 					driver.close()
-					crawler(posts=posts,bar=bar,config=config,split_counter=split_counter,unique_hash=unique_hash,keywords_stack=keywords_stack)
+					crawler(posts=posts,bar=bar,config=config,split_counter=split_counter,unique_hash=unique_hash,keywords_stack=keywords_stack,start_time=start_time)
 				soup = BeautifulSoup(driver.page_source)
 				tweets = soup.findAll(attrs={"data-testid" : "tweet"})
 				for tweet in tweets:
@@ -147,32 +156,22 @@ def crawler(PROXY_HOST="127.0.0.1",PROXY_PORT=9050,posts=[],bar=None,config={},s
 				exc_type, exc_obj, exc_tb = sys.exc_info()
 				fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
 				print(exc_type, fname, exc_tb.tb_lineno)
-				exit()
 	except Exception as e:
 		exc_type, exc_obj, exc_tb = sys.exc_info()
 		fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
 		print(exc_type, fname, exc_tb.tb_lineno)
 		exit()
-	# finally:
-	# 	df = pd.DataFrame.from_dict(posts)
-	# 	if config['type'] == 'csv':
-	# 		df.to_csv("{}data-{}-{}.csv".format(config['results_path'],split,split_counter))
-	# 	else:
-	# 		df.to_json("{}data-{}-{}.json".format(config['results_path'],split,split_counter))
-
-	# 	hash_file=open("{}unique-hashes.txt".format(config['results_path'],split,split_counter),'w')
-	# 	for hash in unique_hash:
-	# 		hash_file.write(str(hash)+'\n')
-	# 	hash_file.close()
-	# 	print("\r\n{} post found and write to file!".format(len(posts)))
 
 if __name__ == "__main__":
 	os.system("cls")
+	start_time=datetime.now()
+	print("Started At: {}".format(start_time.strftime("%Y-%m-%d %H:%M:%S")))
+	
 	if not os.path.isfile('config.ini'):
 		path="{}\\results\\".format(os.getcwd())
 		config=open("./config.ini","w",encoding='utf-8')
 		os.makedirs(path)
-		config.write('keywords="کرونا,کوید19,کروناویروس,ویروس_کرونا"\ncount=20000\nheadless=no\ntype=csv\nsplit=1000\nresults_path="{}"'.format(path))
+		config.write('keywords="کرونا,ویروس‌کرونا,کوید_19,کوید19,کروناویروس,ویروس_کرونا"\ncount=20000\nheadless=no\ntype=csv\nsplit=1000\nresults_path="{}"\nfrom_date=2020-10-01\nto_date=2020-10-15'.format(path))
 		config.close()
 		print("Config File Generated... Run Again")
 		exit(0)
@@ -184,7 +183,8 @@ if __name__ == "__main__":
 		with open("{}unique-hashes.txt".format(config['results_path']),'r',encoding='utf-8') as unique_hash_file:
 			for line in unique_hash_file:
 				unique_hash.append(line.replace("\n",""))
-			print("\r\nLoad Old Hashe [{}]".format(len(unique_hash)))
+				bar.next()
+			print("\r\nLoad Old Hashs [{}]".format(len(unique_hash)))
 			time.sleep(3)
 
 	keywords_stack=[]
@@ -192,6 +192,4 @@ if __name__ == "__main__":
 		keywords_stack=config['keywords'].split(',')
 	else:
 		keywords_stack=config['keywords']
-
-	print("Started At: {}".format(datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-	crawler(bar=bar,config=config,unique_hash=unique_hash,split_counter=len(unique_hash),keywords_stack=keywords_stack)
+	crawler(bar=bar,config=config,unique_hash=unique_hash,split_counter=len(unique_hash) // int(config['split']),keywords_stack=keywords_stack,start_time=start_time)
