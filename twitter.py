@@ -1,5 +1,5 @@
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from selenium import webdriver
 import hashlib, re, random
 from bs4 import BeautifulSoup
@@ -21,10 +21,11 @@ def switchIP():
         controller.signal(Signal.NEWNYM)
 
 
+def plus_date(specific_date):
+	return str((datetime.strptime(specific_date,"%Y-%m-%d") + timedelta(days= 1)).strftime("%Y-%m-%d"))
 
 
-def crawler(PROXY_HOST="127.0.0.1",PROXY_PORT=9050,posts=[],bar=None,config={},split_counter=0,unique_hash=[],keywords_stack=[],start_time=datetime.now()):
-	# os.system("cls")
+def crawler(PROXY_HOST="127.0.0.1",PROXY_PORT=9050,posts=[],bar=None,config={},split_counter=0,unique_hash=[],start_time=datetime.now(),start_date=datetime.now()):
 	last_reload_at=datetime.now()
 	fp = webdriver.FirefoxProfile()
 	count= int(config['count'])
@@ -47,24 +48,40 @@ def crawler(PROXY_HOST="127.0.0.1",PROXY_PORT=9050,posts=[],bar=None,config={},s
 	soup = BeautifulSoup(html, 'lxml')
 	print("\r\nTor IP: ",soup.find("pre").text)
 	try:
-		keyword=keywords_stack.pop()		
-		# str_filter="(%23{})%20lang%3Afa%20since%3A2020-02-16%20-filter%3Alinks%20-filter%3Areplies&src=typed_query&f=live".format(keyword)
-		str_filter="(%23{})%20lang%3Afa%20until%3A{}%20since%3A{}%20-filter%3Alinks%20-filter%3Areplies&src=typed_query&f=live".format(keyword,config['to_date'],config['from_date'])
+		date_from=str(start_date).split(' ')[0]
+		date_to=plus_date(date_from)		
+		print("\r\nCrawl From: {}  -->  {}".format(date_from,date_to))
+		str_filter="{}%20lang%3A{}%20until%3A{}%20since%3A{}&src=typed_query&f=live".format(config['keywords'],config['lang'],date_to,date_from)
 		main_link='https://twitter.com/search?q={}'.format(str_filter)
-		keywords_stack.insert(0,keyword)
-		print("Stack: ",keywords_stack, keyword)
 		driver.get(main_link)				
 		while True:
 			try:				
 				time_diff_sec=(datetime.now() - last_reload_at).seconds
-				if "Something went wrong." in driver.page_source or time_diff_sec > 50 or "No results for " in driver.page_source:
+				if  time_diff_sec > 45:
+					print("\r\nNo More Tweets... Increase Date +1 day")
+					dt=open("{}last-date.txt".format(config['results_path']),'w',encoding='utf-8')
+					dt.write(date_to)
+					dt.close()
+					try:
+						driver.close()
+					except:
+						pass
+					if str(date_to) == config['date_to']:
+						df = pd.DataFrame.from_dict(posts)
+						if config['type'] == 'csv':
+							df.to_csv("{}data-{}-{}.csv".format(config['results_path'],split,split_counter+1))
+						else:
+							df.to_json("{}data-{}-{}.json".format(config['results_path'],split,split_counter+1))
+						hash_file=open("{}unique-hashes.txt".format(config['results_path'],split,split_counter),'w')
+						print("Finish...")
+						exit(0)
+					crawler(posts=posts,bar=bar,config=config,split_counter=split_counter,unique_hash=unique_hash,start_time=start_time,start_date=date_to)
+				if "Something went wrong." in driver.page_source or "No results for " in driver.page_source:
 					switchIP()
-					# diff_in_min = ((datetime.now() - start_time).seconds // 60) // bar.index
-					# print("\r\nCrawl Speed: {} tpm(tweet per minute)".format(diff_in_min))
 					print("\r\nSwitch Proxy...")
 					print("\r\nPosts Count: {}, Diff In Sec: {}".format(len(posts),time_diff_sec))
 					driver.close()
-					crawler(posts=posts,bar=bar,config=config,split_counter=split_counter,unique_hash=unique_hash,keywords_stack=keywords_stack,start_time=start_time)
+					crawler(posts=posts,bar=bar,config=config,split_counter=split_counter,unique_hash=unique_hash,start_time=start_time,start_date=start_date)
 				soup = BeautifulSoup(driver.page_source)
 				tweets = soup.findAll(attrs={"data-testid" : "tweet"})
 				for tweet in tweets:
@@ -170,8 +187,8 @@ if __name__ == "__main__":
 	if not os.path.isfile('config.ini'):
 		path="{}\\results\\".format(os.getcwd())
 		config=open("./config.ini","w",encoding='utf-8')
-		os.makedirs(path)
-		config.write('keywords="کرونا,ویروس‌کرونا,کوید_19,کوید19,کروناویروس,ویروس_کرونا"\ncount=20000\nheadless=no\ntype=csv\nsplit=1000\nresults_path="{}"\nfrom_date=2020-10-01\nto_date=2020-10-15'.format(path))
+		os.makedirs(path,exist_ok=True)
+		config.write('keywords="(کورنا%20OR%20کرونا%20OR%20کوید%20OR%20کورونا)"\ncount=20000\nlang=fa\nheadless=no\ntype=csv\nsplit=1000\nresults_path={}\ndate_from=2020-02-01\ndate_to=2020-11-15\nstep=1'.format(path))
 		config.close()
 		print("Config File Generated... Run Again")
 		exit(0)
@@ -187,9 +204,11 @@ if __name__ == "__main__":
 			print("\r\nLoad Old Hashs [{}]".format(len(unique_hash)))
 			time.sleep(3)
 
-	keywords_stack=[]
-	if "," in config['keywords']:
-		keywords_stack=config['keywords'].split(',')
-	else:
-		keywords_stack=config['keywords']
-	crawler(bar=bar,config=config,unique_hash=unique_hash,split_counter=len(unique_hash) // int(config['split']),keywords_stack=keywords_stack,start_time=start_time)
+	start_date=config['date_from']
+	if os.path.exists("{}last-date.txt".format(config['results_path'])):
+		with open("{}last-date.txt".format(config['results_path']),'r',encoding='utf-8') as last_date:
+			for dt in last_date:
+				start_date=dt
+
+	start_date=datetime.strptime(start_date,"%Y-%m-%d")
+	crawler(bar=bar,config=config,unique_hash=unique_hash,split_counter=len(unique_hash) // int(config['split']),start_time=start_time,start_date=start_date)
